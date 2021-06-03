@@ -1,6 +1,7 @@
 module Tree
   ( IVP
   , VPC
+  , Thread
   , TreeMap
   , toTreeMap
   , lookup
@@ -13,6 +14,8 @@ import MasonPrelude
 import Data.Array as Array
 import Data.List ((:))
 import Data.List as List
+import Data.List.NonEmpty (NonEmptyList)
+import Data.List.NonEmpty as NEList
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Set as Set
@@ -144,22 +147,26 @@ siblings key tm =
             >>= traverse (find .> map _.value)
           Nothing -> Right []
 
-type Thread a = List (a /\ Array a)
+type Thread a = NonEmptyList (a /\ Array a)
 
 getThread :: ∀ a b. Ord a => a -> TreeMap a b -> Maybe (Thread b)
-getThread start tm = go Nil start <#> List.reverse
+getThread start tm = go start pure <#> NEList.reverse
   where
-    go :: Thread b -> a -> Maybe (Thread b)
-    go acc key = do
+    go :: a -> (b /\ Array b -> Thread b) -> Maybe (Thread b)
+    go key f = do
       lookup key tm
       >>= \{ value, parent } ->
             case siblings key tm of
               Right sibs ->
-                let newAcc = (value /\ sibs ) : acc in
+                let f'd = f $ value /\ sibs in
                 case parent of
-                  Just pid -> go newAcc pid
-                  Nothing -> Just newAcc
+                  Just pid -> helper f'd pid
+                  Nothing -> Just f'd
               Left _ -> unsafeThrow "Tree.purs: getThread"
+
+    helper :: Thread b -> a -> Maybe (Thread b)
+    helper acc = do
+      go ~$ (NEList.cons ~$ acc)
 
 getThreads :: ∀ a b. Ord a => TreeMap a b -> Array (Thread b)
 getThreads tm@(TreeMap { leaves }) =

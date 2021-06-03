@@ -8,6 +8,7 @@ import Data.Set (Set)
 import Data.Set as Set
 import Data.List (List(..), (:))
 import Data.List as List
+import Data.List.NonEmpty as NEList
 import Data.Array as Array
 import Data.Maybe (Maybe(..), fromJust, fromMaybe, isNothing)
 import Data.Int as Int
@@ -49,8 +50,10 @@ import Y.Client.CalcDims (calcDims)
 import Y.Client.Colors as Colors
 
 -- Mason's stuff
+import Css (Styles)
 import Debug as Debug
-import Tree (IVP, TreeMap, VPC, toTreeMap)
+import Platform (batch)
+import Tree (IVP, Thread, TreeMap, VPC, toTreeMap)
 import Tree as Tree
 
 processEvents ::
@@ -301,59 +304,80 @@ view model = { head: headView, body: [bodyView] }
     ]
     [
       -- Mason's stuff
-      H.divS
-        [ S.position "absolute"
-        , S.width "20%"
-        , S.top "0"
-        , S.left "0"
-        , S.border "1px solid black"
-        ]
-        []
-        $ (let
-             { names: names :: Map (Id "User") String
-             , messages: messages :: TreeMap (Id "Message") Message
-             }
-               = Debug.log $ processEvents model.convo.events
+      (let
+         threadView :: Thread Message -> Html Action
+         threadView =
+           Array.fromFoldable
+           >>> map
+                 (\(message /\ siblings) ->
+                    let
+                      createMessage :: Styles -> Message -> Html Action
+                      createMessage styles mes =
+                        H.divS
+                          [ S.border "1px solid darkgray"
+                          , styles
+                          ]
+                          []
+                          [ H.divS
+                              [ S.fontSize "0.75em"
+                              , S.fontStyle "italic"
+                              , S.opacity "0.5"
+                              , S.marginBottom "0.5em"
+                              , S.paddingTop "1px"
+                              ]
+                              []
+                              [ H.text "Mason" ]
+                          , H.div [] [ H.text mes.content ]
+                          ]
+                    in
+                    batch
+                    $ Array.snoc
+                        (siblings <#> createMessage (S.background "lightgray"))
+                        (createMessage (S.background "white") message)
+                    # Array.reverse
+                 )
+           >>> H.divS
+                 [ S.border "1px solid"
+                 , S.maxHeight "300px"
+                 , S.overflow "auto"
+                 , S.display "flex"
+                 , S.flexDirection "column-reverse"
+                 ]
+                 []
+       in
+       H.divS
+         [ S.position "absolute"
+         , S.width "30%"
+         , S.top "0"
+         , S.left "0"
+         , S.border "1px solid black"
+         , S.zIndex "1"
+         , S.overflow "auto"
+         , S.height "100%"
+         ]
+         []
+       $ (let
+            { names, messages } =
+              Debug.log $ processEvents model.convo.events ::
+                { names :: Map (Id "User") String
+                , messages :: TreeMap (Id "Message") Message
+                }
 
-             _ =
-               Debug.log
-               $ Tree.getThreads messages
-               # Array.sortBy
-                   (\a b ->
-                      case a, b of
-                        aHead : _, bHead : _ ->
-                          compare
-                            (fst bHead).timeSent
-                            (fst aHead).timeSent
-
-                        Nil, Nil -> EQ
-                        Nil, _ -> LT
-                        _, Nil -> GT
-                   )
-           in
-           Array.fromFoldable model.convo.events
-           <#> (\event ->
-                  case (Debug.log event).payload of
-                    EventPayload_MessageSend { message } ->
-                      Tree.lookup message.id messages
-                      <#> \m -> message.content /\ show (Array.length m.children)
-
-                    _ -> Nothing
-               )
-           # Array.catMaybes
-           <#> \(message /\ children) ->
-                 H.divS [ S.border "1px solid" ] []
-                   [ H.div [] [ H.text message ]
-                   , H.div [] [ H.text children ]
-                   ]
-        )
-      {-
-
-      - get messages into a tree structure
-
-      -}
+            threads :: Array (Thread Message)
+            threads =
+              Debug.log
+              $ Tree.getThreads messages
+              # Array.sortBy
+                  \a b ->
+                    compare
+                      (fst $ NEList.head b).timeSent
+                      (fst $ NEList.head a).timeSent
+          in
+          threadView <$> threads
+         )
       ----------------------------------
 
+      )
     , H.divS
       [ S.position "absolute"
       , S.width "0"
