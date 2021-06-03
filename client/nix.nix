@@ -5,7 +5,7 @@ let
 inherit (import ../shared/nix.nix { inherit pkgs; }) purs-nix;
 
 nixed = purs-nix.purs
-  { src = ../.;
+  { src = null; #[ ./src ../shared/src ];
     dependencies =
       with purs-nix.ps-pkgs;
       let ns = purs-nix.ps-pkgs-ns; in
@@ -52,4 +52,14 @@ in {
     '';
   };
 
+ shell =
+   pkgs.mkShell
+     { buildInputs =
+         with pkgs;
+         [ nodejs
+           nodePackages.purescript-language-server
+           nodePackages.live-server
+           (nixed.command { srcs = [ "src" "../shared/src" ]; })
+         ];
+     };
 }

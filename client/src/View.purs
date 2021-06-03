@@ -6,13 +6,14 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Set (Set)
 import Data.Set as Set
-import Data.List (List)
+import Data.List (List(..), (:))
 import Data.List as List
 import Data.Array as Array
 import Data.Maybe (Maybe(..), fromJust, fromMaybe, isNothing)
 import Data.Int as Int
+import Data.Tuple (fst)
 import Data.Tuple.Nested ((/\))
-import Data.Foldable (fold, foldl, minimumBy, length, maximum, foldMap)
+import Data.Foldable (fold, foldl, foldr, minimumBy, length, maximum, foldMap)
 import Data.Newtype (unwrap)
 import Data.Generic.Rep (class Generic)
 import Data.Monoid (guard)
@@ -33,7 +34,7 @@ import WHATWG.DOM.Event (stopPropagation) as Wwg
 import Y.Shared.Util.Instant (Instant)
 import Y.Shared.Id (Id)
 import Y.Shared.Id as Id
-import Y.Shared.Convo (EventPayload(..), Message, simulate)
+import Y.Shared.Convo (Event, EventPayload(..), Message, simulate)
 
 import Y.Client.Util.Vec2 (Vec2)
 import Y.Client.Util.Vec2 as Vec2
@@ -46,6 +47,62 @@ import Y.Client.Arrange (algorithms) as Arrange
 import Y.Client.ArrangementAlgorithms.Types (ArrangementAlgorithm(..)) as Arrange
 import Y.Client.CalcDims (calcDims)
 import Y.Client.Colors as Colors
+
+-- Mason's stuff
+import Debug as Debug
+import Tree (IVP, TreeMap, VPC, toTreeMap)
+import Tree as Tree
+
+processEvents ::
+  List Event
+  -> { names :: Map (Id "User") String
+     , messages :: TreeMap (Id "Message") Message
+     }
+processEvents =
+  splitEvents
+  >>> \{ nameEvents, messageEvents } ->
+        { names: Map.empty
+        , messages:
+            messageEvents
+            <#> _.message >>> toIVP
+            # toTreeMap
+        }
+
+splitEvents ::
+  List Event
+  -> { nameEvents ::
+         List
+           { convoId :: Id "Convo"
+           , userId :: Id "User"
+           , name :: String
+           }
+     , messageEvents ::
+         List
+           { convoId :: Id "Convo"
+           , message :: Message
+           }
+     }
+splitEvents =
+  foldr
+    (\event acc@{ nameEvents, messageEvents } ->
+       case event.payload of
+         EventPayload_SetName data' ->
+           acc { nameEvents = data' : nameEvents }
+
+         EventPayload_MessageSend data' ->
+           acc { messageEvents = data' : messageEvents }
+    )
+    { nameEvents: Nil
+    , messageEvents: Nil
+    }
+
+toIVP :: Message -> IVP (Id "Message") Message
+toIVP value@{ id, depIds } =
+  { id
+  , value
+  , parent: Set.findMax depIds
+  }
+-----------------------------------------------------------
 
 -- A card is a message or a draft plus computed info such as the shared fields
 -- The real solution here would be to use lenses
@@ -242,7 +299,62 @@ view model = { head: headView, body: [bodyView] }
 
               else Actions.noop
     ]
-    [ H.divS
+    [
+      -- Mason's stuff
+      H.divS
+        [ S.position "absolute"
+        , S.width "20%"
+        , S.top "0"
+        , S.left "0"
+        , S.border "1px solid black"
+        ]
+        []
+        $ (let
+             { names: names :: Map (Id "User") String
+             , messages: messages :: TreeMap (Id "Message") Message
+             }
+               = Debug.log $ processEvents model.convo.events
+
+             _ =
+               Debug.log
+               $ Tree.getThreads messages
+               # Array.sortBy
+                   (\a b ->
+                      case a, b of
+                        aHead : _, bHead : _ ->
+                          compare
+                            (fst bHead).timeSent
+                            (fst aHead).timeSent
+
+                        Nil, Nil -> EQ
+                        Nil, _ -> LT
+                        _, Nil -> GT
+                   )
+           in
+           Array.fromFoldable model.convo.events
+           <#> (\event ->
+                  case (Debug.log event).payload of
+                    EventPayload_MessageSend { message } ->
+                      Tree.lookup message.id messages
+                      <#> \m -> message.content /\ show (Array.length m.children)
+
+                    _ -> Nothing
+               )
+           # Array.catMaybes
+           <#> \(message /\ children) ->
+                 H.divS [ S.border "1px solid" ] []
+                   [ H.div [] [ H.text message ]
+                   , H.div [] [ H.text children ]
+                   ]
+        )
+      {-
+
+      - get messages into a tree structure
+
+      -}
+      ----------------------------------
+
+    , H.divS
       [ S.position "absolute"
       , S.width "0"
       , S.height "0"
